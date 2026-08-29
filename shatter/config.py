@@ -267,6 +267,21 @@ RECORD_CODEC = "libvpx-vp9"
 RECORD_LANDSCAPE = (1920, 1080)
 RECORD_PORTRAIT = (1080, 1920)
 
+# Apple silicon has hardware H.264 and HEVC encoders but no VP9 encoder --
+# VP9 is decode-only. Software libvpx-vp9 measured 2.7fps for both outputs
+# at 1080p, so realtime VP9 at 60fps is not reachable on this machine at
+# any setting, and asking for it just drops two frames in three.
+#
+# So capture runs on the hardware encoder at a high bitrate, and the VP9
+# the spec asks for is produced by transcoding once recording stops. The
+# output is the specified VP9 12Mbps in both aspect ratios; what changes
+# is that it arrives a little after you press R rather than during.
+RECORD_MODES = ("vp9", "vp9-realtime", "h264")
+RECORD_MODE = "vp9"
+RECORD_INTERMEDIATE_CODEC = "hevc_videotoolbox"
+RECORD_INTERMEDIATE_BITRATE = "40M"
+RECORD_INTERMEDIATE_SUFFIX = ".mov"
+
 
 @dataclass
 class Tunables:
@@ -350,7 +365,10 @@ class RuntimeOptions:
     tuning_mode: bool = False
     show_debug: bool = True
     fullscreen: bool = False
+    headless: bool = False
     vsync: bool = True
+    frames: int = 0
+    record_mode: str = RECORD_MODE
     shard_count: int = SHARD_COUNT_TIERS[0]
     ladder_enabled: bool = True
     gpu_delegate: bool = True

@@ -33,6 +33,7 @@ uniform vec4 u_uv;            // uv = a * rest_px + b, mirror baked in
 uniform float u_bevel;        // 1 normally, 0 when fully reassembled
 uniform float u_thickness;
 uniform float u_perspective;
+uniform vec2 u_shadow_offset;   // zero for the lit pass
 
 void main() {
     int sid = int(in_shard + 0.5);
@@ -79,6 +80,10 @@ void main() {
 
     // Fake perspective: near shards swell slightly, far ones shrink.
     world = centre + (world - centre) * (1.0 + (st.z - 0.5) * u_perspective);
+    // The shadow pass is the same geometry, displaced. Scaling the
+    // offset by depth makes near shards throw their shadow further,
+    // which is the cheapest possible cue that the pile has depth.
+    world += u_shadow_offset * (0.5 + st.z);
 
     v_screen = world;
     v_normal = world_normal;

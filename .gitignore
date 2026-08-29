@@ -27,3 +27,4 @@ bench_*.json
 
 # macOS
 .DS_Store
+models/.delegate.json

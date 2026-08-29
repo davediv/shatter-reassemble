@@ -9,7 +9,10 @@ you because draw calls return long before the work is done.
 
 GPU queries are read from several frames back rather than immediately.
 Asking for a result the GPU has not reached yet blocks until it has, which
-would turn the profiler into the very stall it is trying to find.
+would turn the profiler into the very stall it is trying to find. Six
+frames of slack rather than two or three, because an unthrottled loop can
+run well ahead of the GPU and a shallow ring starts blocking exactly when
+the frame is busiest.
 
 The ladder runs off wall-clock frame time rather than off either timer.
 That is deliberate: the thing the user experiences is the frame interval,
@@ -34,7 +37,7 @@ __all__ = ["FrameProfiler", "QualityLadder", "GpuProfiler"]
 class GpuProfiler:
     """GL_TIME_ELAPSED queries, read from ``depth`` frames ago."""
 
-    def __init__(self, ctx, depth: int = 3) -> None:
+    def __init__(self, ctx, depth: int = 6) -> None:
         self.ctx = ctx
         self.depth = depth
         self.available = True

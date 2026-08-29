@@ -69,9 +69,14 @@ def main() -> int:
         # stop before the app tears the pile down -- finishing the phase
         # releases the shard buffer, and comparing against an empty canvas
         # proves nothing.
+        # The guard is generous on purpose. Reassembly is scheduled
+        # against wall-clock time while this loop counts frames, and an
+        # uncapped headless loop can exceed 600fps -- a tight frame cap
+        # exits before the last shard has landed and reports a seam that
+        # is really just an unfinished animation.
         app._reassemble()
         guard = 0
-        while app.phase is Phase.REASSEMBLING and guard < 600:
+        while app.phase is Phase.REASSEMBLING and guard < 40000:
             app.step()
             guard += 1
             state = app.reassembly.state
@@ -79,6 +84,10 @@ def main() -> int:
                 break
         if app.shards.count == 0:
             print("error: the pile was released before it could be compared")
+            return 2
+        state = app.reassembly.state
+        if state.progress < 1.0:
+            print(f"error: animation did not finish (progress {state.progress:.3f})")
             return 2
 
         # Redraw the pile one last time with every shard at rest and the

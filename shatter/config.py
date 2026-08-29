@@ -62,6 +62,23 @@ CANVAS_HEIGHT = 1080
 # --------------------------------------------------------------------------
 
 NUM_HANDS = 2
+
+# MediaPipe is fed a downscaled copy of the frame. Landmarks come back in
+# normalised coordinates, so an aspect-preserving downscale costs nothing
+# in mapping accuracy -- and the palm detector resamples to 192x192
+# internally regardless, so a hand occupies the same fraction of the
+# detector's input either way. Measured on an M1 Air with capture running:
+# 1280x720 -> 9.6ms/frame, 640x360 -> 9.1ms, 512x288 -> 6.6ms. 640 keeps
+# more detail for the landmark model, which is what snap detection reads.
+TRACKING_INPUT_WIDTH = 640
+
+# Python's default 5ms GIL switch interval is poison here: MediaPipe's
+# binding dispatches every detect_for_video through a thread-pool round
+# trip, so a waiting thread can eat a full switch interval per call. With
+# capture running, dropping 5ms -> 1ms took detection from 12.2ms to 9.3ms
+# and worst case from 26.0ms to 21.4ms.
+GIL_SWITCH_INTERVAL = 0.001
+
 MIN_HAND_DETECTION_CONFIDENCE = 0.5
 MIN_HAND_PRESENCE_CONFIDENCE = 0.5
 MIN_TRACKING_CONFIDENCE = 0.5
@@ -104,6 +121,13 @@ FINGER_CHAINS = (
     (13, 17, 18, 19, 20),   # pinky
     (0, 17),                # palm base closing edge
 )
+
+# Silhouette segmentation runs on its own thread at its own rate: it is a
+# faint background outline, not something that needs to track at 60Hz, and
+# stacking it onto the landmark thread blew the tracking budget (measured
+# 8.9ms at full res, 2.8ms at 256x144).
+SEGMENT_INPUT_WIDTH = 256
+SEGMENT_MAX_HZ = 20.0
 
 # --------------------------------------------------------------------------
 # Physics

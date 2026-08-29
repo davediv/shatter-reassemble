@@ -345,7 +345,7 @@ class ShatterApp:
             display.begin_frame()
             display.ctx.clear(0.0, 0.0, 0.0, 1.0)
             with self.gpu.section("video"):
-                self.video.draw(freeze=0.0)
+                self.video.draw()
         else:
             with self.gpu.section("void"):
                 self.void.render_scene()
@@ -374,7 +374,7 @@ class ShatterApp:
 
             # The frozen frame gives way to live video over the final 150ms.
             if self.phase is Phase.REASSEMBLING and reassembly.crossfade > 0.0:
-                self.video.draw(freeze=0.0, alpha=reassembly.crossfade)
+                self.video.draw(alpha=reassembly.crossfade)
 
         self._draw_overlay(hands, now)
 

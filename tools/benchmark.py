@@ -83,6 +83,16 @@ def phase_run(app: ShatterApp, frames: int, collect: list) -> None:
         collect.append((time.perf_counter() - start) * 1e3)
 
 
+def sections(app: ShatterApp) -> dict:
+    """CPU section averages as they stand right now.
+
+    Snapshotted per phase rather than once at the end: the phases cost
+    very different amounts, and a single reading taken after reassembly
+    describes reassembly, not the fall.
+    """
+    return {k: round(v, 3) for k, v in app.profiler.sections.items()}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shards", type=int, default=800)
@@ -117,6 +127,7 @@ def main() -> int:
         idle: list = []
         phase_run(app, args.warmup, idle)
         result["idle"] = percentiles(idle)
+        result["idle_sections"] = sections(app)
 
         app._shatter((args.width * 0.72, args.height * 0.34))
         result["shards_actual"] = app.world.count
@@ -130,12 +141,14 @@ def main() -> int:
         falling: list = []
         phase_run(app, args.falling, falling)
         result["falling"] = percentiles(falling)
+        result["falling_sections"] = sections(app)
         result["falling_awake"] = app.world.stats.awake
         result["falling_contacts"] = app.world.stats.contacts
 
         settled: list = []
         phase_run(app, args.settled, settled)
         result["settled"] = percentiles(settled)
+        result["settled_sections"] = sections(app)
         result["settled_awake"] = app.world.stats.awake
         result["settled_contacts"] = app.world.stats.contacts
 
@@ -144,10 +157,9 @@ def main() -> int:
         while app.phase is Phase.REASSEMBLING and len(reassembling) < 400:
             phase_run(app, 1, reassembling)
         result["reassembling"] = percentiles(reassembling)
+        result["reassembling_sections"] = sections(app)
         result["rest_error_px"] = app.reassembly.rest_error()
 
-        result["cpu_sections"] = {k: round(v, 3)
-                                  for k, v in app.profiler.sections.items()}
         result["gpu_sections"] = {k: round(v, 3)
                                   for k, v in app.gpu.results().items()}
         result["tracking"] = {

@@ -113,6 +113,7 @@ class ShatterApp:
         self.tuning.active = options.tuning_mode
 
         self._last_frame_index = -1
+        self._interval = 1000.0 / 60.0
         self._flash = 0.0
         self._snap_time = -1e9
         self._capsule_seg = np.zeros((MAX_CAPSULES, 4), np.float64)
@@ -295,7 +296,11 @@ class ShatterApp:
             capsules = self._update_capsules(hands)
             if self.phase is Phase.SHATTERED:
                 self.world.iterations = level.solver_iterations
-                self.world.step(min(self.profiler.frame_ms * 1e-3, 0.05))
+                # The real interval, not the smoothed average: the
+                # accumulator wants elapsed time, and feeding it a
+                # low-passed number lets simulated time drift away from
+                # wall time, which reassembly is scheduled against.
+                self.world.step(min(self._interval * 1e-3, 0.05))
                 transforms = self.world.interpolated()
             elif self.phase is Phase.REASSEMBLING:
                 state = self.reassembly.update(now)
@@ -316,7 +321,7 @@ class ShatterApp:
 
         self.display.present()
         self.gpu.next_frame()
-        self.profiler.end_frame()
+        self._interval = self.profiler.end_frame()
         self.frame_index += 1
 
         if self.ladder.update(self.profiler.rolling_ms, now):
@@ -478,18 +483,25 @@ class ShatterApp:
         still has to load and link it -- roughly 87KB of machine code for
         the clipper alone. Left until the first snap, that lands as a
         multi-second freeze on the single most important frame in the app.
-        A throwaway 64-cell fracture and one physics step on it compile
-        exactly the same specialisations the real ones use.
+
+        Warmed at the real shard count and canvas size, not a token one.
+        Qhull carries its own first-call cost that scales with the point
+        count: warming with 64 cells left the first 800-cell fracture
+        taking 32ms, of which 23ms was Voronoi construction alone.
         """
         start = time.perf_counter()
-        tiny = fracture(256, 144, (128.0, 72.0), 64, bevel=config.BEVEL_WIDTH)
-        scratch = PhysicsWorld(96, 256, 144)
+        count = min(self.options.shard_count, config.SHARD_COUNT_TIERS[0])
+        tiny = fracture(self.options.width, self.options.height,
+                        (self.options.width * 0.5, self.options.height * 0.5),
+                        count, bevel=config.BEVEL_WIDTH)
+        scratch = PhysicsWorld(count + 32, self.options.width, self.options.height)
         scratch.load(tiny)
         scratch.set_capsules(
             np.array([[10.0, 10.0, 40.0, 40.0]], np.float64),
             np.array([12.0], np.float64),
             np.array([[100.0, 0.0]], np.float64),
         )
+        scratch.explode((self.options.width * 0.5, self.options.height * 0.5))
         scratch.step(1.0 / 60.0)
         elapsed = time.perf_counter() - start
         if verbose:

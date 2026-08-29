@@ -191,10 +191,14 @@ SHARD_COUNT_MIN = 300
 FRACTURE_CLUSTER_FRACTION = 0.55
 FRACTURE_CLUSTER_SIGMA = 0.17     # fraction of canvas diagonal
 FRACTURE_RELAX_ITERATIONS = 1     # Lloyd relaxation passes on the far field
-# Clipping the diagram to the canvas occasionally leaves a sliver a couple
-# of pixels across. It is invisible, but it still costs a physics body and
-# a solver slot, so anything under this is dropped.
-MIN_SHARD_AREA = 16.0             # px^2
+# Clipping the diagram to the canvas occasionally leaves a degenerate
+# sliver. Dropping one leaves a genuine hole in the reassembled image --
+# with the threshold at 16px^2 the pixel comparison found five black
+# pixels clustered around the snap origin, where the cells are smallest.
+# That is the one place in this app where a hole is unacceptable, so the
+# threshold only rejects cells too small to cover a pixel at all, and
+# every cell that can be seen keeps its body.
+MIN_SHARD_AREA = 0.5              # px^2
 # How far the hand may drift between arming and firing before a
 # speculatively-built fracture is thrown away and rebuilt.
 FRACTURE_PREDICT_TOLERANCE = 160.0   # px

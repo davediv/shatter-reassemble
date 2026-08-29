@@ -15,6 +15,7 @@ in vec2 v_normal;
 in float v_edge;
 in float v_part;
 in float v_depth;
+in float v_relief;
 in float v_alpha;
 in float v_flash;
 
@@ -37,8 +38,10 @@ void main() {
     }
     vec3 base = texture(u_frozen, v_uv).bgr;
 
-    // Depth shading, so the pile reads as a pile and not as a decal.
-    float shade = 0.72 + v_depth * 0.42;
+    // Depth shading, so the pile reads as a pile and not as a decal --
+    // faded out with relief so a reassembled shard is exactly as bright as
+    // the frozen pixel underneath it.
+    float shade = mix(1.0, 0.72 + v_depth * 0.42, v_relief);
 
     vec3 color;
     if (v_part < 0.5) {

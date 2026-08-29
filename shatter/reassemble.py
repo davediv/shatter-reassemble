@@ -41,6 +41,7 @@ class ReassemblyState:
     finished: bool = False
     progress: float = 0.0        # 0..1 across the whole animation
     bevel: float = 1.0           # shader uniform: 1 normal, 0 fully closed
+    relief: float = 1.0          # 1 = full 2.5D, 0 = flat against the frame
     flash: float = 0.0           # screen flash on the final landing
     crossfade: float = 0.0       # 0 frozen shards, 1 live video
     landed: int = 0
@@ -180,6 +181,13 @@ class Reassembly:
         # The bevel closes over the last quarter, so every vertex is back
         # on the true cell boundary by the time the last shard lands.
         bevel = float(np.clip((0.94 - progress) / 0.19, 0.0, 1.0))
+        # Relief -- thickness, perspective, depth shading, refraction --
+        # flattens on the same schedule. Each is a displacement or a tint
+        # that makes a flat polygon read as glass, and each would stop the
+        # reassembled image from being the frozen frame if it survived to
+        # the end. Started slightly earlier than the bevel so the pile
+        # settles into the plane rather than snapping into it.
+        relief = float(np.clip((0.90 - progress) / 0.24, 0.0, 1.0))
 
         # Cross-fade to live video over the final 150ms of the flash tail.
         fade_start = self._total
@@ -195,6 +203,7 @@ class Reassembly:
             finished=finished,
             progress=progress,
             bevel=bevel,
+            relief=relief,
             flash=flash,
             crossfade=crossfade,
             landed=landed_count,

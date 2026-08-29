@@ -33,22 +33,36 @@ _FLOATS_PER_VERTEX = 8      # x, y, u, v, r, g, b, a
 
 
 class TextRenderer:
-    def __init__(self, display: Display, capacity: int = 4096) -> None:
+    def __init__(self, display: Display, capacity: int = 4096,
+                 *, shared: "TextRenderer | None" = None) -> None:
         self.display = display
         self.ctx = display.ctx
-        self.atlas, self.advance = self._bake()
-        self._texture = self.ctx.texture(
-            (self.atlas.shape[1], self.atlas.shape[0]), 1, self.atlas.tobytes()
-        )
-        self._texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self._texture.repeat_x = self._texture.repeat_y = False
-
-        self._program = make_program(self.ctx, "text.vert", "text.frag")
+        self._owns_shared_resources = shared is None
+        if shared is None:
+            self.atlas, self.advance = self._bake()
+            self._texture = self.ctx.texture(
+                (self.atlas.shape[1], self.atlas.shape[0]),
+                1,
+                self.atlas.tobytes(),
+            )
+            self._texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            self._texture.repeat_x = self._texture.repeat_y = False
+            self._program = make_program(self.ctx, "text.vert", "text.frag")
+        else:
+            self.atlas = shared.atlas
+            self.advance = shared.advance
+            self._texture = shared._texture
+            self._program = shared._program
         self._data = np.zeros((capacity, _FLOATS_PER_VERTEX), np.float32)
         self._count = 0
+        self._cached_count = 0
         self._queued: list = []
         self._buffer = self.ctx.buffer(reserve=self._data.nbytes, dynamic=True)
         self._vao = self._make_vao()
+
+    def fork(self, capacity: int = 4096) -> "TextRenderer":
+        """Create an independent batch sharing the atlas and shader."""
+        return TextRenderer(self.display, capacity, shared=self)
 
     def _make_vao(self) -> moderngl.VertexArray:
         return self.ctx.vertex_array(
@@ -186,6 +200,7 @@ class TextRenderer:
     def flush(self) -> int:
         if self._build() == 0:
             self._queued.clear()
+            self._cached_count = 0
             return 0
         self._buffer.write(self._data[: self._count])
         self._texture.use(0)
@@ -196,12 +211,29 @@ class TextRenderer:
         self.ctx.disable(moderngl.DEPTH_TEST)
         self._vao.render(moderngl.TRIANGLES, vertices=self._count)
         drawn = self._count
+        self._cached_count = drawn
         self._count = 0
         self._queued.clear()
         return drawn
 
+    def render_cached(self) -> int:
+        """Redraw the last flushed strings without rebuilding their quads."""
+        if self._cached_count == 0:
+            return 0
+        self._texture.use(0)
+        self._program["u_atlas"].value = 0
+        self._program["u_canvas_size"].value = (
+            self.display.canvas_width, self.display.canvas_height
+        )
+        self.ctx.disable(moderngl.DEPTH_TEST)
+        self._vao.render(moderngl.TRIANGLES, vertices=self._cached_count)
+        return self._cached_count
+
     def release(self) -> None:
-        for obj in (self._vao, self._buffer, self._texture):
+        objects = [self._vao, self._buffer]
+        if self._owns_shared_resources:
+            objects.append(self._texture)
+        for obj in objects:
             try:
                 obj.release()
             except Exception:

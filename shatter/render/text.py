@@ -57,6 +57,23 @@ class TextRenderer:
         self._count = 0
         self._cached_count = 0
         self._queued: list = []
+        glyph_capacity = max(capacity // 6, 1)
+        self._codes = np.zeros(glyph_capacity, np.int32)
+        self._pen = np.zeros(glyph_capacity, np.float32)
+        self._top = np.zeros(glyph_capacity, np.float32)
+        self._sizes = np.zeros(glyph_capacity, np.float32)
+        self._colors = np.zeros((glyph_capacity, 4), np.float32)
+        self._sequence = np.arange(glyph_capacity, dtype=np.float32)
+        self._right = np.zeros(glyph_capacity, np.float32)
+        self._bottom = np.zeros(glyph_capacity, np.float32)
+
+        glyphs = np.arange(LAST_CHAR - FIRST_CHAR + 1, dtype=np.int32)
+        du = np.float32(1.0 / COLUMNS)
+        dv = np.float32(CELL_H / self.atlas.shape[0])
+        self._glyph_u0 = (glyphs % COLUMNS).astype(np.float32) * du
+        self._glyph_v0 = (glyphs // COLUMNS).astype(np.float32) * dv
+        self._glyph_u1 = self._glyph_u0 + du
+        self._glyph_v1 = self._glyph_v0 + dv
         self._buffer = self.ctx.buffer(reserve=self._data.nbytes, dynamic=True)
         self._vao = self._make_vao()
 
@@ -137,35 +154,53 @@ class TextRenderer:
         if not self._queued:
             return 0
 
-        codes = []
-        origin_x = []
-        origin_y = []
-        sizes = []
-        colors = []
+        total = sum(len(text) for text, *_ in self._queued)
+        if total > self._codes.size:
+            capacity = max(total, self._codes.size * 2)
+            self._codes = np.zeros(capacity, np.int32)
+            self._pen = np.zeros(capacity, np.float32)
+            self._top = np.zeros(capacity, np.float32)
+            self._sizes = np.zeros(capacity, np.float32)
+            self._colors = np.zeros((capacity, 4), np.float32)
+            self._sequence = np.arange(capacity, dtype=np.float32)
+            self._right = np.zeros(capacity, np.float32)
+            self._bottom = np.zeros(capacity, np.float32)
+
+        cursor = 0
         for text, x, y, size, color in self._queued:
             raw = np.frombuffer(text.encode("latin-1", "replace"), np.uint8)
-            codes.append(raw)
+            count = raw.size
+            end = cursor + count
+            section = slice(cursor, end)
+            self._codes[section] = raw
             step = size * self.advance
-            origin_x.append(x + np.arange(raw.size, dtype=np.float32) * step)
-            origin_y.append(np.full(raw.size, y, np.float32))
-            sizes.append(np.full(raw.size, size, np.float32))
-            colors.append(np.tile(np.asarray(color, np.float32), (raw.size, 1)))
+            np.multiply(self._sequence[:count], step,
+                        out=self._pen[section])
+            self._pen[section] += x
+            self._top[section].fill(y)
+            self._sizes[section].fill(size)
+            self._colors[section] = color
+            cursor = end
 
-        codes = np.concatenate(codes).astype(np.int32) - FIRST_CHAR
-        pen = np.concatenate(origin_x)
-        top = np.concatenate(origin_y)
-        size = np.concatenate(sizes)
-        color = np.concatenate(colors)
+        codes = self._codes[:cursor]
+        codes -= FIRST_CHAR
 
         visible = (codes >= 0) & (codes <= LAST_CHAR - FIRST_CHAR) & (codes != 32 - FIRST_CHAR)
         if not visible.any():
             return 0
-        codes = codes[visible]
-        pen = pen[visible]
-        top = top[visible]
-        size = size[visible]
-        color = color[visible]
-        count = codes.size
+        count = int(np.count_nonzero(visible))
+        if count != cursor:
+            self._codes[:count] = codes[visible]
+            self._pen[:count] = self._pen[:cursor][visible]
+            self._top[:count] = self._top[:cursor][visible]
+            self._sizes[:count] = self._sizes[:cursor][visible]
+            self._colors[:count] = self._colors[:cursor][visible]
+
+        codes = self._codes[:count]
+        pen = self._pen[:count]
+        top = self._top[:count]
+        size = self._sizes[:count]
+        color = self._colors[:count]
 
         needed = count * 6
         if needed > self._data.shape[0]:
@@ -175,14 +210,17 @@ class TextRenderer:
             self._vao.release()
             self._vao = self._make_vao()
 
-        du, dv = 1.0 / COLUMNS, CELL_H / self.atlas.shape[0]
-        u0 = (codes % COLUMNS).astype(np.float32) * du
-        v0 = (codes // COLUMNS).astype(np.float32) * dv
-        u1, v1 = u0 + du, v0 + dv
+        u0 = self._glyph_u0[codes]
+        v0 = self._glyph_v0[codes]
+        u1 = self._glyph_u1[codes]
+        v1 = self._glyph_v1[codes]
         x0 = pen
-        x1 = pen + size * (CELL_W / CELL_H)
+        np.multiply(size, CELL_W / CELL_H, out=self._right[:count])
+        np.add(pen, self._right[:count], out=self._right[:count])
+        x1 = self._right[:count]
         y0 = top
-        y1 = top + size
+        np.add(top, size, out=self._bottom[:count])
+        y1 = self._bottom[:count]
 
         out = self._data[: count * 6].reshape(count, 6, _FLOATS_PER_VERTEX)
         for slot, (px, py, pu, pv) in enumerate((

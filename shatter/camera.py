@@ -36,6 +36,26 @@ __all__ = ["Frame", "FrameSource", "CameraSource", "SyntheticSource",
 RING_SIZE = 4
 
 
+def _retrieve_into(cap, into: np.ndarray) -> bool:
+    """Decode the grabbed frame directly into a reusable ring buffer.
+
+    OpenCV backends are allowed to ignore the supplied output array. Keep a
+    fallback for those backends while making the common matching-size path
+    allocation- and copy-free.
+    """
+    ok, frame = cap.retrieve(into)
+    if not ok or frame is None:
+        return False
+    if frame is into or np.shares_memory(frame, into):
+        return True
+    if frame.shape == into.shape:
+        np.copyto(into, frame)
+    else:
+        cv2.resize(frame, (into.shape[1], into.shape[0]), dst=into,
+                   interpolation=cv2.INTER_AREA)
+    return True
+
+
 @dataclass(frozen=True)
 class Frame:
     """One captured frame. ``data`` is BGR uint8, HxWx3.
@@ -242,17 +262,7 @@ class CameraSource(FrameSource):
         cap = self._cap
         if cap is None or not cap.grab():
             return False
-        ok, frame = cap.retrieve()
-        if not ok or frame is None:
-            return False
-        if frame.shape == into.shape:
-            # retrieve() allocates; copy into the ring so downstream sees a
-            # stable buffer and the allocation is freed immediately.
-            np.copyto(into, frame)
-        else:
-            cv2.resize(frame, (into.shape[1], into.shape[0]), dst=into,
-                       interpolation=cv2.INTER_AREA)
-        return True
+        return _retrieve_into(cap, into)
 
     def _release(self) -> None:
         if self._cap is not None:
@@ -349,14 +359,11 @@ class VideoFileSource(FrameSource):
             return False
         self._next_due += 1.0 / self.fps
 
-        ok, frame = self._cap.read()
-        if not ok:
+        if not self._cap.grab():
             self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            ok, frame = self._cap.read()
-            if not ok:
+            if not self._cap.grab():
                 return False
-        np.copyto(into, frame)
-        return True
+        return _retrieve_into(self._cap, into)
 
     def _release(self) -> None:
         self._cap.release()

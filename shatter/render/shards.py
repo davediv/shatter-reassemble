@@ -26,7 +26,7 @@ import moderngl
 import numpy as np
 
 from .. import config
-from ..fracture import FLOATS_PER_VERTEX, FractureResult
+from ..fracture import FractureResult
 from ..viewport import CoverFit
 from .context import Display, make_program
 

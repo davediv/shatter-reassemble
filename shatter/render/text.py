@@ -46,6 +46,7 @@ class TextRenderer:
         self._program = make_program(self.ctx, "text.vert", "text.frag")
         self._data = np.zeros((capacity, _FLOATS_PER_VERTEX), np.float32)
         self._count = 0
+        self._queued: list = []
         self._buffer = self.ctx.buffer(reserve=self._data.nbytes, dynamic=True)
         self._vao = self._make_vao()
 
@@ -91,6 +92,7 @@ class TextRenderer:
 
     def begin(self) -> None:
         self._count = 0
+        self._queued.clear()
 
     def measure(self, text: str, size: float) -> tuple[float, float]:
         return len(text) * size * self.advance, size
@@ -103,52 +105,87 @@ class TextRenderer:
         size: float = 22.0,
         color=(1.0, 1.0, 1.0, 1.0),
     ) -> float:
-        """Queue a string with its top-left at (x, y). Returns the end x."""
-        if not text:
-            return x
-        printable = [c for c in text if FIRST_CHAR <= ord(c) <= LAST_CHAR]
-        needed = self._count + len(printable) * 6
+        """Queue a string with its top-left at (x, y). Returns the end x.
+
+        Queued, not built. The HUD draws dozens of short strings a frame,
+        and numpy's per-call overhead on a twelve-character array dwarfs
+        the work itself -- so every queued string is expanded together in
+        one pass at flush time, which makes the cost depend on the total
+        glyph count rather than on how many strings it arrived in.
+        """
+        step = size * self.advance
+        if text:
+            self._queued.append((text, float(x), float(y), float(size),
+                                 tuple(color)))
+        return x + len(text) * step
+
+    def _build(self) -> int:
+        if not self._queued:
+            return 0
+
+        codes = []
+        origin_x = []
+        origin_y = []
+        sizes = []
+        colors = []
+        for text, x, y, size, color in self._queued:
+            raw = np.frombuffer(text.encode("latin-1", "replace"), np.uint8)
+            codes.append(raw)
+            step = size * self.advance
+            origin_x.append(x + np.arange(raw.size, dtype=np.float32) * step)
+            origin_y.append(np.full(raw.size, y, np.float32))
+            sizes.append(np.full(raw.size, size, np.float32))
+            colors.append(np.tile(np.asarray(color, np.float32), (raw.size, 1)))
+
+        codes = np.concatenate(codes).astype(np.int32) - FIRST_CHAR
+        pen = np.concatenate(origin_x)
+        top = np.concatenate(origin_y)
+        size = np.concatenate(sizes)
+        color = np.concatenate(colors)
+
+        visible = (codes >= 0) & (codes <= LAST_CHAR - FIRST_CHAR) & (codes != 32 - FIRST_CHAR)
+        if not visible.any():
+            return 0
+        codes = codes[visible]
+        pen = pen[visible]
+        top = top[visible]
+        size = size[visible]
+        color = color[visible]
+        count = codes.size
+
+        needed = count * 6
         if needed > self._data.shape[0]:
-            grown = np.zeros((max(needed, self._data.shape[0] * 2),
-                              _FLOATS_PER_VERTEX), np.float32)
-            grown[: self._count] = self._data[: self._count]
-            self._data = grown
+            self._data = np.zeros((max(needed, self._data.shape[0] * 2),
+                                   _FLOATS_PER_VERTEX), np.float32)
             self._buffer.orphan(self._data.nbytes)
             self._vao.release()
             self._vao = self._make_vao()
 
-        step = size * self.advance
-        glyph_w = size * (CELL_W / CELL_H)
         du, dv = 1.0 / COLUMNS, CELL_H / self.atlas.shape[0]
-        rgba = np.asarray(color, np.float32)
+        u0 = (codes % COLUMNS).astype(np.float32) * du
+        v0 = (codes // COLUMNS).astype(np.float32) * dv
+        u1, v1 = u0 + du, v0 + dv
+        x0 = pen
+        x1 = pen + size * (CELL_W / CELL_H)
+        y0 = top
+        y1 = top + size
 
-        pen = x
-        for char in printable:
-            index = ord(char) - FIRST_CHAR
-            if char != " ":
-                u = (index % COLUMNS) * du
-                v = (index // COLUMNS) * dv
-                out = self._data[self._count: self._count + 6]
-                corners = (
-                    (pen, y, u, v),
-                    (pen + glyph_w, y, u + du, v),
-                    (pen + glyph_w, y + size, u + du, v + dv),
-                    (pen, y, u, v),
-                    (pen + glyph_w, y + size, u + du, v + dv),
-                    (pen, y + size, u, v + dv),
-                )
-                for i, (px, py, pu, pv) in enumerate(corners):
-                    out[i, 0] = px
-                    out[i, 1] = py
-                    out[i, 2] = pu
-                    out[i, 3] = pv
-                out[:, 4:] = rgba
-                self._count += 6
-            pen += step
-        return pen
+        out = self._data[: count * 6].reshape(count, 6, _FLOATS_PER_VERTEX)
+        for slot, (px, py, pu, pv) in enumerate((
+            (x0, y0, u0, v0), (x1, y0, u1, v0), (x1, y1, u1, v1),
+            (x0, y0, u0, v0), (x1, y1, u1, v1), (x0, y1, u0, v1),
+        )):
+            out[:, slot, 0] = px
+            out[:, slot, 1] = py
+            out[:, slot, 2] = pu
+            out[:, slot, 3] = pv
+        out[:, :, 4:] = color[:, None, :]
+        self._count = count * 6
+        return self._count
 
     def flush(self) -> int:
-        if self._count == 0:
+        if self._build() == 0:
+            self._queued.clear()
             return 0
         self._buffer.write(self._data[: self._count])
         self._texture.use(0)
@@ -160,6 +197,7 @@ class TextRenderer:
         self._vao.render(moderngl.TRIANGLES, vertices=self._count)
         drawn = self._count
         self._count = 0
+        self._queued.clear()
         return drawn
 
     def release(self) -> None:

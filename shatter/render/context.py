@@ -189,10 +189,11 @@ class Display:
         self._blit["u_canvas"].value = 0
         self._blit["u_canvas_size"].value = (self.window_width, self.window_height)
         self._blit["u_rect"].value = (off_x, off_y, 1.0 / draw_w, 1.0 / draw_h)
-        depth_was = self.ctx.depth_func
+        # No save/restore of depth state here: moderngl's depth_func is
+        # write-only and reading it raises. Every pass sets up the state it
+        # needs anyway, so there is nothing to preserve.
         self.ctx.disable(moderngl.DEPTH_TEST)
         self._blit_vao.render(moderngl.TRIANGLES, vertices=3)
-        self.ctx.depth_func = depth_was
         glfw.swap_buffers(self._window)
 
     def poll(self) -> None:

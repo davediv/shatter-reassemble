@@ -9,13 +9,22 @@ that each interior edge is shared by exactly two cells at the same
 coordinates, and reports how far apart they actually are.
 """
 
+import time
 import unittest
 from collections import defaultdict
+from threading import Event
+from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 
 from shatter import config
-from shatter.fracture import FLOATS_PER_VERTEX, PART_FACE, fracture
+from shatter.fracture import (
+    FLOATS_PER_VERTEX,
+    PART_FACE,
+    FracturePrewarmer,
+    fracture,
+)
 
 WIDTH, HEIGHT = 1920, 1080
 ORIGIN = (1400.0, 400.0)
@@ -179,6 +188,60 @@ class TestDeterminism(unittest.TestCase):
         a = fracture(WIDTH, HEIGHT, (200.0, 200.0), 400, seed=42)
         b = fracture(WIDTH, HEIGHT, (1700.0, 900.0), 400, seed=42)
         self.assertFalse(np.array_equal(a.centroid, b.centroid))
+
+
+class TestPrewarmer(unittest.TestCase):
+    def test_repeated_nearby_requests_share_an_inflight_build(self):
+        started = Event()
+        release = Event()
+        calls = []
+
+        def slow_fracture(width, height, origin, count, *, bevel):
+            calls.append(origin)
+            started.set()
+            self.assertTrue(release.wait(1.0))
+            return SimpleNamespace(
+                origin=origin,
+                shard_count=count,
+                bevel=bevel,
+            )
+
+        prewarmer = FracturePrewarmer()
+        with mock.patch("shatter.fracture.fracture", side_effect=slow_fracture):
+            prewarmer.start()
+            try:
+                prewarmer.request(WIDTH, HEIGHT, ORIGIN, 800, config.BEVEL_WIDTH)
+                self.assertTrue(started.wait(1.0))
+                for offset in range(20):
+                    prewarmer.request(
+                        WIDTH,
+                        HEIGHT,
+                        (ORIGIN[0] + offset, ORIGIN[1]),
+                        800,
+                        config.BEVEL_WIDTH,
+                    )
+                release.set()
+                deadline = time.perf_counter() + 1.0
+                while time.perf_counter() < deadline:
+                    with prewarmer._lock:
+                        if prewarmer._result is not None:
+                            break
+                    time.sleep(0.001)
+                self.assertIsNotNone(
+                    prewarmer.take(
+                        WIDTH,
+                        HEIGHT,
+                        (ORIGIN[0] + 19, ORIGIN[1]),
+                        800,
+                        config.BEVEL_WIDTH,
+                    )
+                )
+            finally:
+                release.set()
+                prewarmer.stop()
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(prewarmer.hits, 1)
 
 
 if __name__ == "__main__":

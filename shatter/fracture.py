@@ -661,6 +661,8 @@ class FracturePrewarmer:
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._request: Optional[tuple] = None
+        self._building: Optional[tuple] = None
+        self._desired: Optional[tuple] = None
         self._result: Optional[FractureResult] = None
         self._thread: Optional[threading.Thread] = None
         self.hits = 0
@@ -683,13 +685,21 @@ class FracturePrewarmer:
 
     def request(self, width, height, origin, count, bevel) -> None:
         """Ask for a fracture at ``origin``. Non-blocking; latest wins."""
+        candidate = (width, height, tuple(origin), count, bevel)
         with self._lock:
+            self._desired = candidate
             ready = self._result
             if (ready is not None and ready.shard_count == count
                     and ready.bevel == bevel
                     and _near(ready.origin, origin)):
+                self._request = None
                 return          # what we already have is still good enough
-            self._request = (width, height, tuple(origin), count, bevel)
+            if _request_near(self._building, candidate):
+                self._request = None
+                return          # the matching result is already on its way
+            if _request_near(self._request, candidate):
+                return
+            self._request = candidate
         self._wake.set()
 
     def prime(self, result: FractureResult) -> None:
@@ -707,6 +717,8 @@ class FracturePrewarmer:
         with self._lock:
             ready = self._result
             self._result = None
+            self._request = None
+            self._desired = None
             if (ready is not None and ready.shard_count == count
                     and ready.bevel == bevel
                     and _near(ready.origin, origin)):
@@ -719,6 +731,7 @@ class FracturePrewarmer:
         with self._lock:
             self._result = None
             self._request = None
+            self._desired = None
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -728,18 +741,36 @@ class FracturePrewarmer:
                 return
             with self._lock:
                 pending, self._request = self._request, None
+                self._building = pending
             if pending is None:
                 continue
             try:
                 built = fracture(pending[0], pending[1], pending[2],
                                  pending[3], bevel=pending[4])
             except Exception:
+                with self._lock:
+                    self._building = None
                 continue
             with self._lock:
-                # Drop it if a newer request arrived while we were working.
-                if self._request is None:
+                self._building = None
+                # Publish only if it still satisfies the latest requested
+                # origin. A newer, distant request remains queued; repeated
+                # nearby requests are coalesced onto this one build.
+                if _request_near(pending, self._desired):
                     self._result = built
 
 
 def _near(a, b, tolerance: float = config.FRACTURE_PREDICT_TOLERANCE) -> bool:
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 <= tolerance * tolerance
+
+
+def _request_near(a: Optional[tuple], b: Optional[tuple]) -> bool:
+    if a is None or b is None:
+        return False
+    return (
+        a[0] == b[0]
+        and a[1] == b[1]
+        and a[3] == b[3]
+        and a[4] == b[4]
+        and _near(a[2], b[2])
+    )

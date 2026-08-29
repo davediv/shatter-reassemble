@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Numba
+.numba_cache/
+
+# Model weights (downloaded by tools/fetch_models.py)
+models/*.task
+models/*.tflite
+
+# Recording output
+recordings/*.webm
+recordings/*.mp4
+
+# Local tuning overrides
+tuning.json
+
+# Profiling artifacts
+*.prof
+bench_*.json
+
+# macOS
+.DS_Store

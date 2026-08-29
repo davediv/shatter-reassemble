@@ -1,0 +1,13 @@
+# Core numerics. numba JIT-compiles the physics solver and the Voronoi
+# clipper to native code -- without it the 800-shard budget is unreachable.
+numpy>=1.26
+numba>=0.60
+scipy>=1.11
+
+# Rendering: OpenGL 4.1 core (the ceiling on macOS) via moderngl + GLFW.
+moderngl>=5.10
+glfw>=2.6
+
+# Hand tracking. Pulls in opencv-contrib-python, which provides the
+# AVFoundation/V4L2 capture backends we use in camera.py.
+mediapipe>=0.10.14

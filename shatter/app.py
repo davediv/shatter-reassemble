@@ -491,11 +491,15 @@ class ShatterApp:
         """
         start = time.perf_counter()
         count = min(self.options.shard_count, config.SHARD_COUNT_TIERS[0])
-        tiny = fracture(self.options.width, self.options.height,
-                        (self.options.width * 0.5, self.options.height * 0.5),
-                        count, bevel=config.BEVEL_WIDTH)
+        prepared = fracture(
+            self.options.width,
+            self.options.height,
+            (self.options.width * 0.5, self.options.height * 0.5),
+            count,
+            bevel=config.BEVEL_WIDTH,
+        )
         scratch = PhysicsWorld(count + 32, self.options.width, self.options.height)
-        scratch.load(tiny)
+        scratch.load(prepared)
         scratch.set_capsules(
             np.array([[10.0, 10.0, 40.0, 40.0]], np.float64),
             np.array([12.0], np.float64),
@@ -503,6 +507,11 @@ class ShatterApp:
         )
         scratch.explode((self.options.width * 0.5, self.options.height * 0.5))
         scratch.step(1.0 / 60.0)
+        # The warmup fracture is production geometry, not throwaway work.
+        # It is centred close enough to the keyboard snap (and most initial
+        # hand snaps) to satisfy the same prediction tolerance as a normal
+        # speculative result.
+        self.prewarmer.prime(prepared)
         elapsed = time.perf_counter() - start
         if verbose:
             print(f"[warmup] solver and fracture ready in {elapsed:.2f}s")

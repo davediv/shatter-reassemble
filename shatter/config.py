@@ -57,6 +57,11 @@ CAMERA_INDEX = 0
 CANVAS_WIDTH = 1920
 CANVAS_HEIGHT = 1080
 
+# Diagnostic numbers do not need to rebuild hundreds of glyphs at the render
+# rate. Ten updates per second still reads as live while leaving the other
+# frames free to reuse their GPU buffers.
+DEBUG_HUD_HZ = 10.0
+
 # --------------------------------------------------------------------------
 # Tracking
 # --------------------------------------------------------------------------

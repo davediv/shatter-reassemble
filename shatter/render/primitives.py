@@ -26,18 +26,28 @@ _FLOATS_PER_VERTEX = 6      # x, y, r, g, b, a
 class ShapeBatch:
     """Accumulate triangles in canvas pixel space; flush in one draw call."""
 
-    def __init__(self, display: Display, capacity: int = 8192) -> None:
+    def __init__(self, display: Display, capacity: int = 8192,
+                 *, shared: "ShapeBatch | None" = None) -> None:
         self.display = display
         self.ctx = display.ctx
         self._data = np.zeros((capacity, _FLOATS_PER_VERTEX), np.float32)
         self._count = 0
-        self._program = make_program(self.ctx, "shapes.vert", "shapes.frag")
+        self._cached_count = 0
+        self._program = (
+            shared._program
+            if shared is not None
+            else make_program(self.ctx, "shapes.vert", "shapes.frag")
+        )
         self._buffer = self.ctx.buffer(reserve=self._data.nbytes, dynamic=True)
         self._vao = self.ctx.vertex_array(
             self._program, [(self._buffer, "2f 4f", "in_pos", "in_color")]
         )
         # Unit circle, resolved once and scaled per disc.
         self._unit_circle = {}
+
+    def fork(self, capacity: int = 8192) -> "ShapeBatch":
+        """Create an independent batch that shares the compiled shader."""
+        return ShapeBatch(self.display, capacity, shared=self)
 
     # -- capacity ---------------------------------------------------------
 
@@ -176,6 +186,7 @@ class ShapeBatch:
     def flush(self, depth_test: bool = False) -> int:
         """Draw everything accumulated. Returns the vertex count drawn."""
         if self._count == 0:
+            self._cached_count = 0
             return 0
         # A contiguous row slice satisfies the buffer protocol, so this
         # uploads straight out of the accumulation array with no copy.
@@ -189,8 +200,23 @@ class ShapeBatch:
             self.ctx.disable(moderngl.DEPTH_TEST)
         self._vao.render(moderngl.TRIANGLES, vertices=self._count)
         drawn = self._count
+        self._cached_count = drawn
         self._count = 0
         return drawn
+
+    def render_cached(self, depth_test: bool = False) -> int:
+        """Redraw the last flushed buffer without rebuilding or uploading it."""
+        if self._cached_count == 0:
+            return 0
+        self._program["u_canvas_size"].value = (
+            self.display.canvas_width, self.display.canvas_height
+        )
+        if depth_test:
+            self.ctx.enable(moderngl.DEPTH_TEST)
+        else:
+            self.ctx.disable(moderngl.DEPTH_TEST)
+        self._vao.render(moderngl.TRIANGLES, vertices=self._cached_count)
+        return self._cached_count
 
     def release(self) -> None:
         for obj in (self._vao, self._buffer):

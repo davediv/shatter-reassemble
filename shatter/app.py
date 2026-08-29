@@ -88,6 +88,12 @@ class ShatterApp:
         self.text = TextRenderer(self.display)
         self.overlay = DebugOverlay(self.shapes, self.text)
         self.overlay.visible = options.show_debug
+        # HUD panels change slowly compared with the skeleton and flashes.
+        # Give them retained buffers of their own so ordinary frames only
+        # resubmit the existing geometry instead of rebuilding it.
+        self.hud_shapes = self.shapes.fork(capacity=2048)
+        self.hud_text = self.text.fork(capacity=4096)
+        self.hud_overlay = DebugOverlay(self.hud_shapes, self.hud_text)
 
         self.recognizer = GestureRecognizer(self.tunables)
         self.tracker = HandTracker(self.source, self.fit,
@@ -116,6 +122,7 @@ class ShatterApp:
         self._interval = 1000.0 / 60.0
         self._flash = 0.0
         self._snap_time = -1e9
+        self._hud_refresh_at = 0.0
         self._capsule_seg = np.zeros((MAX_CAPSULES, 4), np.float64)
         self._capsule_radius = np.zeros(MAX_CAPSULES, np.float64)
         self._capsule_vel = np.zeros((MAX_CAPSULES, 2), np.float64)
@@ -388,10 +395,29 @@ class ShatterApp:
             self.tuning.draw(self.options.width, self.options.height)
         if self.overlay.visible:
             self.overlay.draw_skeleton(hands)
+
+        refresh_hud = (
+            self.overlay.visible
+            and now >= self._hud_refresh_at
+        )
+        if refresh_hud:
+            self.hud_shapes.begin()
+            self.hud_text.begin()
             self._draw_hud()
+            self._hud_refresh_at = now + 1.0 / config.DEBUG_HUD_HZ
 
         self.shapes.flush()
+        if self.overlay.visible:
+            if refresh_hud:
+                self.hud_shapes.flush()
+            else:
+                self.hud_shapes.render_cached()
         self.text.flush()
+        if self.overlay.visible:
+            if refresh_hud:
+                self.hud_text.flush()
+            else:
+                self.hud_text.render_cached()
 
     def _draw_hud(self) -> None:
         profiler = self.profiler
@@ -420,13 +446,14 @@ class ShatterApp:
             ("record", f"{sections.get('record', 0):5.2f} ms",
              colour(sections.get('record', 0), 1.0)),
         ]
-        end = self.overlay.panel(28, 28, rows, title="FRAME BUDGET")
+        overlay = self.hud_overlay
+        end = overlay.panel(28, 28, rows, title="FRAME BUDGET")
 
         gpu = self.gpu.results()
         if gpu:
             rows = [(name, f"{ms:5.2f} ms", (0.7, 0.85, 1.0, 1))
                     for name, ms in sorted(gpu.items())]
-            end = self.overlay.panel(28, end, rows, title="GPU")
+            end = overlay.panel(28, end, rows, title="GPU")
 
         rows = [
             ("delegate", tracker.delegate, (0.8, 0.85, 0.95, 1)),
@@ -440,7 +467,7 @@ class ShatterApp:
             rows.append(("silhouette", f"{self.silhouette.stats.segment_ms:5.2f} ms "
                                        f"@ {self.silhouette.stats.rate_hz:.0f}Hz",
                          (0.7, 0.78, 0.9, 1)))
-        end = self.overlay.panel(28, end, rows, title="TRACKING")
+        end = overlay.panel(28, end, rows, title="TRACKING")
 
         rows = [
             ("phase", self.phase.value, (1.0, 0.9, 0.5, 1)),
@@ -452,7 +479,7 @@ class ShatterApp:
             ("quality", f"{level.name} ({self.ladder.index})", (1.0, 0.9, 0.5, 1)),
             ("iterations", f"{level.solver_iterations}", (0.7, 0.78, 0.9, 1)),
         ]
-        end = self.overlay.panel(28, end, rows, title="SIMULATION")
+        end = overlay.panel(28, end, rows, title="SIMULATION")
 
         if self.recorder.recording or self.recorder.transcoding:
             stats = self.recorder.stats
@@ -463,9 +490,9 @@ class ShatterApp:
                  (0.9, 0.9, 0.9, 1)),
                 ("elapsed", f"{stats.seconds:.1f}s", (0.9, 0.9, 0.9, 1)),
             ]
-            end = self.overlay.panel(28, end, rows, title="RECORDING")
+            end = overlay.panel(28, end, rows, title="RECORDING")
 
-        self.overlay.hint([
+        overlay.hint([
             self._status,
             "",
             "space snap   C clap   R record   H hide UI   T tuning",
@@ -565,8 +592,8 @@ class ShatterApp:
             self.silhouette.stop()
         self.tracker.stop()
         self.source.stop()
-        for obj in (self.shards, self.video, self.void, self.shapes,
-                    self.text, self.recorder):
+        for obj in (self.shards, self.video, self.void, self.hud_shapes,
+                    self.hud_text, self.shapes, self.text, self.recorder):
             try:
                 obj.release()
             except Exception:

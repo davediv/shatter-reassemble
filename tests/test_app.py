@@ -12,6 +12,7 @@ not to measure anything.
 
 import time
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -134,6 +135,15 @@ class TestRendering(unittest.TestCase):
             self.assertGreater(broken.mean(), 2.0, "shattered frame is black")
             # The void must genuinely be darker than the intact feed.
             self.assertLess(broken.mean(), idle.mean())
+
+            # The expensive outline pass is retained until a new mask lands.
+            with mock.patch.object(app.void, "render_scene",
+                                   wraps=app.void.render_scene) as render:
+                app.step()
+                render.assert_not_called()
+                app.void.upload_mask(np.zeros((36, 64), np.uint8))
+                app.step()
+                render.assert_called_once()
         finally:
             app.shutdown()
 

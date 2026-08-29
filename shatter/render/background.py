@@ -43,6 +43,7 @@ class VoidLayer:
         self.mask.repeat_x = self.mask.repeat_y = False
         self._mask_size = (1, 1)
         self.has_mask = False
+        self.scene_dirty = True
 
         self._program = make_program(self.ctx, "fullscreen.vert", "void.frag")
         self._vao = self.ctx.vertex_array(self._program, [])
@@ -61,6 +62,7 @@ class VoidLayer:
         else:
             self.mask.write(np.ascontiguousarray(mask))
         self.has_mask = True
+        self.scene_dirty = True
 
     def render_scene(self, outline: float = 1.25, fill: float = 0.055,
                      tint=DEFAULT_TINT) -> None:
@@ -84,6 +86,7 @@ class VoidLayer:
         self._program["u_fill"].value = float(fill) if self.has_mask else 0.0
         self._program["u_tint"].value = tint
         self._vao.render(moderngl.TRIANGLES, vertices=3)
+        self.scene_dirty = False
 
     def blit_to_canvas(self) -> None:
         """Copy the scene buffer into the canvas as the background."""

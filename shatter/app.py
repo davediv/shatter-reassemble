@@ -347,8 +347,12 @@ class ShatterApp:
             with self.gpu.section("video"):
                 self.video.draw()
         else:
-            with self.gpu.section("void"):
-                self.void.render_scene()
+            # Segmentation publishes at 20Hz, so the scene texture is valid
+            # for the intervening render frames. Avoid rerunning its five-tap
+            # full-screen outline shader when its only input is unchanged.
+            if self.void.scene_dirty:
+                with self.gpu.section("void"):
+                    self.void.render_scene()
             self.void.blit_to_canvas()
             display.canvas.clear(depth=1.0)
 

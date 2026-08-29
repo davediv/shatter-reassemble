@@ -155,14 +155,29 @@ PENETRATION_SLOP = 0.35     # px
 
 # Sleeping. This is the single thing that makes 800 bodies affordable: a
 # settled pile costs almost nothing because settled bodies leave the solver.
-SLEEP_LINEAR_VELOCITY = 14.0    # px/s
-SLEEP_ANGULAR_VELOCITY = 0.30   # rad/s
+SLEEP_LINEAR_VELOCITY = 22.0    # px/s -- 0.37px per frame at 60fps
+SLEEP_ANGULAR_VELOCITY = 0.45   # rad/s
 SLEEP_TIME = 0.45               # s below both thresholds before sleeping
+# A body only keeps its neighbours awake once it is moving this many times
+# faster than the sleep threshold. With no gap, anything sitting just over
+# the line holds the whole pile awake through the contact graph.
+SLEEP_DISTURB_SCALE = 2.5
 
-# Fake perspective. Bodies are planar; depth only scales and shades them.
+# Fake perspective. Bodies are planar; depth scales and shades them, and
+# it also decides who collides with whom.
 DEPTH_NEAR = 0.86
 DEPTH_FAR = 1.14
 PERSPECTIVE_STRENGTH = 0.055
+
+# The shards tessellate the canvas exactly, so in a strictly 2D world they
+# have nowhere to fall: a perfect tiling cannot compact. Sorting them into
+# depth layers and only colliding within a layer is what lets the pile
+# actually pile -- each layer holds a third of the total area, so it
+# collapses into roughly the bottom third of the frame and empties the top
+# into the void the silhouette lives in. It also cuts the broadphase pair
+# count by about the same factor, which is the difference between making
+# the physics budget and missing it.
+DEPTH_LAYERS = 3
 
 # --------------------------------------------------------------------------
 # Fracture

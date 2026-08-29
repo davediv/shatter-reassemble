@@ -105,6 +105,7 @@ class Recorder:
         self._process: Optional[subprocess.Popen] = None
         self._stop = threading.Event()
         self._started_at = 0.0
+        self._next_capture = 0.0
         self._outputs: tuple = ()
         self._capture_paths: tuple = ()
 
@@ -168,6 +169,7 @@ class Recorder:
         self._pending = [False] * PBO_DEPTH
         self._slot = 0
         self._started_at = time.perf_counter()
+        self._next_capture = self._started_at
         self.stats = RecorderStats(recording=True, outputs=self._outputs,
                                    mode=self.mode)
 
@@ -273,11 +275,27 @@ class Recorder:
     # -- per frame --------------------------------------------------------
 
     def capture(self) -> None:
-        """Queue this frame. Costs a readback request and, two frames
-        later, one memcpy."""
+        """Queue this frame if one is due. Costs a readback request and,
+        two frames later, one memcpy.
+
+        Paced against the *recording* frame rate, not the render loop's.
+        Those coincide with vsync on, but an uncapped loop runs at several
+        hundred fps, and capturing every frame of it both floods the
+        encoder -- 141 of 147 frames dropped, measured -- and writes a
+        stream several times faster than real time into a 60fps container.
+        """
         if not self.recording:
             return
         start = time.perf_counter()
+        if start < self._next_capture:
+            return
+        period = 1.0 / max(self.fps, 1)
+        # Advance the schedule rather than resetting it, so capture stays
+        # locked to real time; if we have fallen more than a frame behind,
+        # give up the backlog instead of bunching frames together.
+        self._next_capture += period
+        if self._next_capture < start:
+            self._next_capture = start + period
         slot = self._slot
         pbo = self._pbos[slot]
 

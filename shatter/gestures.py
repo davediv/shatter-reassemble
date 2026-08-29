@@ -54,6 +54,7 @@ SNAP = "snap"
 CLAP = "clap"
 
 TRACE_CAPACITY = 420        # ~14s at 30Hz, ~7s at 60Hz
+_HISTORY = 8                # frames of wrist-relative position kept
 
 # Hand span can only be trusted once there is a hand to measure.
 _MIN_SPAN = config.HAND_SPAN_MIN_PIXELS
@@ -81,6 +82,7 @@ class GestureSignals:
     clap_lockout: float = 0.0
     open_palm: tuple[bool, bool] = (False, False)
     extension: tuple[float, float] = (0.0, 0.0)
+    travel: tuple[float, float] = (0.0, 0.0)       # spans, wrist-relative
     hands: int = 0
     span: tuple[float, float] = (0.0, 0.0)
 
@@ -100,6 +102,13 @@ class GestureRecognizer:
         self._last_clap_time = -1e9
         self._pinch_latch = np.zeros(slots, np.bool_)
 
+        # Short history of the middle tip's position in the hand's own
+        # frame, for the travel corroboration. Eight samples covers the
+        # window at any tracking rate we can actually run at.
+        self._rel_history = np.zeros((slots, _HISTORY, 2), np.float32)
+        self._rel_times = np.full((slots, _HISTORY), -1e9, np.float64)
+        self._rel_head = np.zeros(slots, np.int32)
+
         # Traces are written here and read by the renderer, so they are
         # snapshotted under the same lock as the signals.
         self.trace_pinch = [TraceBuffer(TRACE_CAPACITY) for _ in range(slots)]
@@ -114,6 +123,8 @@ class GestureRecognizer:
         self.trace_clap_fired = TraceBuffer(TRACE_CAPACITY)
         self.trace_events: Deque[tuple[float, str]] = deque(maxlen=64)
 
+        self._travel = np.zeros(slots, np.float32)
+        self.trace_travel = [TraceBuffer(TRACE_CAPACITY) for _ in range(slots)]
         self.snap_count = 0
         self.clap_count = 0
 
@@ -136,6 +147,7 @@ class GestureRecognizer:
             return {
                 "pinch": [t.snapshot().copy() for t in self.trace_pinch],
                 "flick": [t.snapshot().copy() for t in self.trace_flick],
+                "travel": [t.snapshot().copy() for t in self.trace_travel],
                 "palm": self.trace_palm.snapshot().copy(),
                 "approach": self.trace_approach.snapshot().copy(),
                 "snap_fired": [t.snapshot().copy() for t in self.trace_snap_fired],
@@ -159,6 +171,7 @@ class GestureRecognizer:
 
         pinch = [9.9, 9.9]
         flick = [0.0, 0.0]
+        self._travel[:] = 0.0
         armed = [False, False]
         extension = [0.0, 0.0]
         open_palm = [False, False]
@@ -188,6 +201,22 @@ class GestureRecognizer:
             flick_speed = float(np.hypot(*relative)) / span
             flick[slot] = flick_speed
 
+            # Net wrist-relative travel across the window. Jitter is a
+            # zero-mean walk and accumulates nothing here; a snap carries
+            # the fingertip a large fraction of a hand span.
+            rel_now = middle - points[config.WRIST]
+            head = int(self._rel_head[slot])
+            self._rel_history[slot, head] = rel_now
+            self._rel_times[slot, head] = now
+            self._rel_head[slot] = (head + 1) % _HISTORY
+            recent = (now - self._rel_times[slot]) <= tun.snap_window
+            if recent.any():
+                deltas = self._rel_history[slot][recent] - rel_now
+                travel = float(np.hypot(deltas[:, 0], deltas[:, 1]).max()) / span
+            else:
+                travel = 0.0
+            self._travel[slot] = travel
+
             if pinch_distance < tun.snap_pinch_distance:
                 self._last_pinch_time[slot] = now
                 self._pinch_latch[slot] = True
@@ -198,7 +227,8 @@ class GestureRecognizer:
             lockout[slot] = max(0.0, tun.snap_lockout - since_snap)
 
             if (armed[slot]
-                    and flick_speed > tun.snap_velocity_threshold
+                    and tun.snap_velocity_threshold < flick_speed < tun.snap_max_velocity
+                    and travel > tun.snap_min_travel
                     and since_snap > tun.snap_lockout):
                 self._last_snap_time[slot] = now
                 self._pinch_latch[slot] = False
@@ -259,6 +289,7 @@ class GestureRecognizer:
             clap_lockout=max(0.0, tun.clap_lockout - (now - self._last_clap_time)),
             open_palm=(open_palm[0], open_palm[1]),
             extension=(extension[0], extension[1]),
+            travel=(float(self._travel[0]), float(self._travel[1])),
             hands=frame.hand_count,
             span=(float(frame.span[0]), float(frame.span[1])),
         )
@@ -276,6 +307,7 @@ class GestureRecognizer:
             for slot in range(config.NUM_HANDS):
                 self.trace_pinch[slot].push(min(pinch[slot], 2.0))
                 self.trace_flick[slot].push(flick[slot])
+                self.trace_travel[slot].push(float(self._travel[slot]))
                 self.trace_snap_fired[slot].push(1.0 if snapped[slot] else 0.0)
             self.trace_palm.push(min(palm_distance, 4.0))
             self.trace_approach.push(approach)

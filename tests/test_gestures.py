@@ -154,6 +154,52 @@ class TestSnap(unittest.TestCase):
             h.step(hand_px(wrist, pinched, pinched))
         self.assertEqual(h.kinds().count(SNAP), 1)
 
+    def test_landmark_jitter_does_not_snap(self):
+        """The failure the travel guard exists for.
+
+        A still, pinched hand under realistic landmark noise produces
+        instantaneous velocity spikes that come within ~1.3x of the flick
+        threshold -- close enough to fire on an unlucky frame. Jitter is a
+        zero-mean walk though, so it accumulates almost no net
+        wrist-relative displacement, and the travel guard rejects it with
+        roughly 6x margin. Found by watching the tuning traces.
+        """
+        rng = np.random.default_rng(3)
+        h = GestureHarness()
+        for _ in range(400):
+            wrist = (900.0 + rng.normal(0, 2.0), 600.0 + rng.normal(0, 2.0))
+            pinched = (wrist[0] + rng.normal(0, 3.0), wrist[1] - 100.0 + rng.normal(0, 3.0))
+            h.step(hand_px(wrist, pinched, pinched))
+        self.assertEqual(h.kinds(), [], "landmark jitter fired a snap")
+
+    def test_a_real_snap_still_fires_through_jitter(self):
+        # The same noise, with an actual flick on top of it.
+        rng = np.random.default_rng(11)
+        h = GestureHarness()
+        wrist = (900.0, 600.0)
+        for _ in range(40):
+            pinched = (900.0 + rng.normal(0, 3.0), 500.0 + rng.normal(0, 3.0))
+            h.step(hand_px(wrist, pinched, pinched))
+        h.step(hand_px(wrist, (900.0, 500.0), (938.0, 528.0)))
+        self.assertEqual(h.kinds(), [SNAP])
+
+    def test_a_landmark_teleport_does_not_snap(self):
+        """A tracking discontinuity is not the most emphatic snap ever.
+
+        When MediaPipe re-associates a hand or recovers from a brief loss,
+        a landmark can jump hundreds of pixels in one frame. That clears
+        both the velocity and the travel gates comfortably. The upper
+        sanity bound is what rejects it: no real fingertip moves at 60
+        hand spans per second.
+        """
+        h = GestureHarness()
+        wrist, pinched = (900.0, 600.0), (900.0, 500.0)
+        for _ in range(15):
+            h.step(hand_px(wrist, pinched, pinched))
+        far = (600.0, 540.0)
+        h.step(hand_px(far, far, far))          # 300px teleport
+        self.assertEqual(h.kinds(), [])
+
     def test_snap_is_distance_invariant(self):
         # The same gesture performed at half scale -- twice as far from the
         # lens -- must fire identically, because every threshold is divided

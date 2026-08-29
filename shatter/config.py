@@ -258,7 +258,21 @@ class Tunables:
     # Thumb tip (4) to middle tip (12) closer than this arms the snap.
     snap_pinch_distance: float = 0.25
     # Middle tip must then exceed this speed to fire.
-    snap_velocity_threshold: float = 11.0
+    snap_velocity_threshold: float = 13.0
+    # ... and must also have actually travelled this far, wrist-relative,
+    # within the window. Landmark jitter is a zero-mean random walk: it
+    # can spike the instantaneous velocity but it accumulates almost no
+    # net displacement, while a real snap moves the fingertip most of a
+    # hand span. Measured against synthetic 3px landmark noise, velocity
+    # alone left only a 1.3x margin over the noise floor; adding travel
+    # takes the margin to roughly 6x.
+    snap_min_travel: float = 0.30
+    # Upper sanity bound. A fingertip during a real snap peaks somewhere
+    # around 15-35 spans/s depending on the tracking rate; anything past
+    # this is a tracking discontinuity -- a re-association, or MediaPipe
+    # jumping after a brief loss -- not a hand. Without it, a landmark
+    # teleport reads as the most emphatic snap the user has ever performed.
+    snap_max_velocity: float = 50.0
     # ... within this long of the pinch, or the arm expires.
     snap_window: float = 0.120
     # Re-arm guard so one snap cannot fire twice.

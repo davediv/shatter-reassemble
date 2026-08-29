@@ -692,6 +692,16 @@ class FracturePrewarmer:
             self._request = (width, height, tuple(origin), count, bevel)
         self._wake.set()
 
+    def prime(self, result: FractureResult) -> None:
+        """Publish an already-built fracture for the next matching snap.
+
+        Startup warms Qhull and the numba kernels with a full-size fracture.
+        Keeping that useful result avoids rebuilding the same geometry when
+        the first snap arrives.
+        """
+        with self._lock:
+            self._result = result
+
     def take(self, width, height, origin, count, bevel) -> FractureResult:
         """The fracture for this snap, prepared if possible, built if not."""
         with self._lock:

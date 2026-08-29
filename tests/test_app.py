@@ -63,6 +63,8 @@ class TestLifecycle(unittest.TestCase):
                 app.step()
             app._shatter((600.0, 200.0))
             self.assertIs(app.phase, Phase.SHATTERED)
+            self.assertEqual(app.prewarmer.hits, 1)
+            self.assertEqual(app.prewarmer.misses, 0)
             self.assertGreater(app.world.count, 50)
             self.assertGreater(app.shards.vertex_count, 1000)
 

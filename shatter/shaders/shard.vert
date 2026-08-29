@@ -24,6 +24,7 @@ out vec2 v_normal;    // rotated into world
 out float v_edge;
 out float v_part;
 out float v_depth;
+out float v_relief;
 out float v_alpha;
 out float v_flash;
 
@@ -33,6 +34,7 @@ uniform vec4 u_uv;            // uv = a * rest_px + b, mirror baked in
 uniform float u_bevel;        // 1 normally, 0 when fully reassembled
 uniform float u_thickness;
 uniform float u_perspective;
+uniform float u_relief;         // 1 = full 2.5D, 0 = perfectly flat
 uniform vec2 u_shadow_offset;   // zero for the lit pass
 
 void main() {
@@ -59,7 +61,11 @@ void main() {
     // centre of frame, by more for shards nearer the viewer. Shards in the
     // middle show no side, shards at the edges show a lot -- which is what
     // real perspective does, for one multiply.
-    vec2 extrude = offset * u_thickness * (0.45 + st.z);
+    // Relief animates to zero as the pile reassembles. Every one of these
+    // is a lie that makes a flat polygon look like glass, and every one of
+    // them displaces geometry -- so at rest they must all be off, or the
+    // reassembled image is not the frozen frame it claims to be.
+    vec2 extrude = offset * u_thickness * (0.45 + st.z) * u_relief;
     vec2 world_normal = vec2(xf.z * in_normal.x - xf.w * in_normal.y,
                              xf.w * in_normal.x + xf.z * in_normal.y);
     if (in_part < 0.5) {
@@ -79,7 +85,8 @@ void main() {
     }
 
     // Fake perspective: near shards swell slightly, far ones shrink.
-    world = centre + (world - centre) * (1.0 + (st.z - 0.5) * u_perspective);
+    world = centre + (world - centre)
+            * (1.0 + (st.z - 0.5) * u_perspective * u_relief);
     // The shadow pass is the same geometry, displaced. Scaling the
     // offset by depth makes near shards throw their shadow further,
     // which is the cheapest possible cue that the pile has depth.
@@ -90,6 +97,7 @@ void main() {
     v_edge = in_edge;
     v_part = in_part;
     v_depth = st.z;
+    v_relief = u_relief;
     v_alpha = ex.x;
     v_flash = ex.y;
 

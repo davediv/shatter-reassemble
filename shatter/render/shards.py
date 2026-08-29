@@ -141,6 +141,7 @@ class ShardRenderer:
         bevel_shade: bool = True,
         light=(0.55, -0.83),
         shadow: bool = False,
+        relief: float = 1.0,
     ) -> int:
         if self._vao is None or self.vertex_count == 0:
             return 0
@@ -157,10 +158,14 @@ class ShardRenderer:
         )
         program["u_uv"].value = self.fit.uv_transform()
         program["u_bevel"].value = float(bevel)
+        program["u_relief"].value = float(relief)
         program["u_thickness"].value = float(thickness)
         program["u_perspective"].value = config.PERSPECTIVE_STRENGTH
         program["u_light"].value = light
-        program["u_refraction"].value = 0.0 if shadow else float(refraction)
+        # Refraction displaces the sample, so it fades out with relief too.
+        program["u_refraction"].value = (
+            0.0 if shadow else float(refraction) * float(relief)
+        )
         program["u_bevel_shade"].value = 1.0 if bevel_shade else 0.0
         program["u_shadow"].value = 1.0 if shadow else 0.0
         program["u_shadow_alpha"].value = config.SHADOW_ALPHA

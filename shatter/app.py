@@ -346,14 +346,16 @@ class ShatterApp:
                     self.shards.update_extras(
                         flash=self.reassembly.flash_per_shard
                     )
-                bevel = reassembly.bevel if self.phase is Phase.REASSEMBLING else 1.0
+                animating = self.phase is Phase.REASSEMBLING
+                bevel = reassembly.bevel if animating else 1.0
+                relief = reassembly.relief if animating else 1.0
                 with self.gpu.section("shards"):
-                    if level.shadows:
+                    if level.shadows and relief > 0.0:
                         self.shards.draw(self.video.frozen, self.void.scene_color,
-                                         bevel=bevel, shadow=True)
+                                         bevel=bevel, relief=relief, shadow=True)
                     self.shards.draw(
                         self.video.frozen, self.void.scene_color,
-                        bevel=bevel,
+                        bevel=bevel, relief=relief,
                         refraction=config.REFRACTION_STRENGTH if level.refraction else 0.0,
                         bevel_shade=level.bevel,
                     )

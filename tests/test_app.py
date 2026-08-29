@@ -10,12 +10,27 @@ Deliberately small (120 shards) and short: it is here to catch breakage,
 not to measure anything.
 """
 
+import time
 import unittest
 
 import numpy as np
 
 from shatter import config
 from shatter.app import Phase, ShatterApp
+
+
+def drive_until_idle(app, timeout=15.0):
+    """Step until reassembly finishes, bounded by wall clock.
+
+    Bounded by time rather than by a frame count on purpose: reassembly is
+    scheduled against wall-clock time, and an uncapped headless loop can
+    exceed 600fps, so a frame-count guard exits mid-animation on a fast
+    machine and fails a test the app passed.
+    """
+    deadline = time.perf_counter() + timeout
+    while app.phase is Phase.REASSEMBLING and time.perf_counter() < deadline:
+        app.step()
+    return app.phase
 
 
 def make_app(shards=120, **overrides):
@@ -58,11 +73,7 @@ class TestLifecycle(unittest.TestCase):
 
             app._reassemble()
             self.assertIs(app.phase, Phase.REASSEMBLING)
-            guard = 0
-            while app.phase is Phase.REASSEMBLING and guard < 500:
-                app.step()
-                guard += 1
-            self.assertIs(app.phase, Phase.IDLE)
+            self.assertIs(drive_until_idle(app), Phase.IDLE)
             self.assertEqual(app.reassembly.rest_error(), 0.0)
             self.assertEqual(app.shards.vertex_count, 0)
         finally:
@@ -80,11 +91,7 @@ class TestLifecycle(unittest.TestCase):
                 for _ in range(20):
                     app.step()
                 app._reassemble()
-                guard = 0
-                while app.phase is Phase.REASSEMBLING and guard < 500:
-                    app.step()
-                    guard += 1
-                self.assertIs(app.phase, Phase.IDLE, f"cycle {cycle}")
+                self.assertIs(drive_until_idle(app), Phase.IDLE, f"cycle {cycle}")
         finally:
             app.shutdown()
 

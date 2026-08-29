@@ -77,7 +77,8 @@ class VideoLayer:
             self._live_fbo_cache = fbo
         return fbo
 
-    def draw(self, freeze: float = 0.0, exposure: float = 1.0) -> None:
+    def draw(self, freeze: float = 0.0, exposure: float = 1.0,
+             alpha: float = 1.0) -> None:
         self.live.use(0)
         self.frozen.use(1)
         self._program["u_video"].value = 0
@@ -88,6 +89,7 @@ class VideoLayer:
         self._program["u_uv"].value = self.fit.uv_transform()
         self._program["u_freeze"].value = float(freeze)
         self._program["u_exposure"].value = float(exposure)
+        self._program["u_alpha"].value = float(alpha)
         self._vao.render(moderngl.TRIANGLES, vertices=3)
 
     def release(self) -> None:

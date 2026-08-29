@@ -140,6 +140,7 @@ class ShardRenderer:
         refraction: float = config.REFRACTION_STRENGTH,
         bevel_shade: bool = True,
         light=(0.55, -0.83),
+        shadow: bool = False,
     ) -> int:
         if self._vao is None or self.vertex_count == 0:
             return 0
@@ -159,15 +160,27 @@ class ShardRenderer:
         program["u_thickness"].value = float(thickness)
         program["u_perspective"].value = config.PERSPECTIVE_STRENGTH
         program["u_light"].value = light
-        program["u_refraction"].value = float(refraction)
+        program["u_refraction"].value = 0.0 if shadow else float(refraction)
         program["u_bevel_shade"].value = 1.0 if bevel_shade else 0.0
+        program["u_shadow"].value = 1.0 if shadow else 0.0
+        program["u_shadow_alpha"].value = config.SHADOW_ALPHA
+        program["u_shadow_offset"].value = (
+            config.SHADOW_OFFSET if shadow else (0.0, 0.0)
+        )
 
         ctx = self.ctx
-        ctx.enable(moderngl.DEPTH_TEST)
-        # Shards are opaque and the depth buffer resolves them, so blending
-        # stays off: 800 overlapping alpha-blended pieces would need a CPU
-        # sort every frame, and the pile does not need one.
-        ctx.disable(moderngl.BLEND)
+        if shadow:
+            # Shadows are translucent and unordered, so they blend with no
+            # depth test at all -- drawn before the pile, they simply
+            # darken whatever void is behind it.
+            ctx.disable(moderngl.DEPTH_TEST)
+            ctx.enable(moderngl.BLEND)
+        else:
+            ctx.enable(moderngl.DEPTH_TEST)
+            # Shards are opaque and the depth buffer resolves them, so
+            # blending stays off: 800 overlapping alpha-blended pieces
+            # would need a CPU sort every frame, and this does not.
+            ctx.disable(moderngl.BLEND)
         self._vao.render(moderngl.TRIANGLES, vertices=self.vertex_count)
         ctx.disable(moderngl.DEPTH_TEST)
         ctx.enable(moderngl.BLEND)

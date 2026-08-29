@@ -26,8 +26,15 @@ uniform vec2 u_canvas_size;
 uniform vec2 u_light;
 uniform float u_refraction;    // 0 disables it (ladder rung 3)
 uniform float u_bevel_shade;   // 0 disables bevel shading (ladder rung 4)
+uniform float u_shadow;        // 1 = shadow pass: flat, dark, translucent
+uniform float u_shadow_alpha;
 
 void main() {
+    if (u_shadow > 0.5) {
+        // Flat and dark; the shape is the whole point of a shadow.
+        f_color = vec4(0.0, 0.0, 0.0, u_shadow_alpha * v_alpha);
+        return;
+    }
     vec3 base = texture(u_frozen, v_uv).bgr;
 
     // Depth shading, so the pile reads as a pile and not as a decal.

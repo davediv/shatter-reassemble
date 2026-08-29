@@ -76,11 +76,25 @@ def contention(app) -> float:
     return round(measured / 0.106, 2)
 
 
-def phase_run(app: ShatterApp, frames: int, collect: list) -> None:
+def phase_run(app: ShatterApp, frames: int, collect: list,
+              pace_fps: float) -> None:
+    deadline = time.perf_counter()
+    period = 1.0 / pace_fps if pace_fps > 0.0 else 0.0
     for _ in range(frames):
+        if period:
+            deadline += period
         start = time.perf_counter()
         app.step()
         collect.append((time.perf_counter() - start) * 1e3)
+        if period:
+            remaining = deadline - time.perf_counter()
+            if remaining > 0.0:
+                time.sleep(remaining)
+            else:
+                # A slow frame is already a valid slow-device sample. Do not
+                # add catch-up bursts that would stop later frames from
+                # representing the requested cadence.
+                deadline = time.perf_counter()
 
 
 def sections(app: ShatterApp) -> dict:
@@ -104,6 +118,13 @@ def main() -> int:
     parser.add_argument("--json", type=str, default="")
     parser.add_argument("--ladder", action="store_true",
                         help="leave the degradation ladder enabled")
+    parser.add_argument(
+        "--pace-fps",
+        type=float,
+        default=60.0,
+        help="pace phases so physics and reassembly advance at this cadence; "
+             "0 runs uncapped",
+    )
     parser.add_argument("--no-silhouette", action="store_false",
                         dest="segmentation")
     args = parser.parse_args()
@@ -119,13 +140,19 @@ def main() -> int:
     result = {
         "shards_requested": args.shards,
         "canvas": [args.width, args.height],
+        "pace_fps": args.pace_fps,
         "load_average": round(os.getloadavg()[0], 2),
     }
     try:
         result["warmup_s"] = round(app.warmup(verbose=False), 2)
         result["contention_factor"] = contention(app)
+        # The contention probe is deliberately synchronous and should not be
+        # mistaken for a giant first frame by either physics or the profiler.
+        app.profiler.reset()
+        if args.pace_fps > 0.0:
+            app._interval = 1000.0 / args.pace_fps
         idle: list = []
-        phase_run(app, args.warmup, idle)
+        phase_run(app, args.warmup, idle, args.pace_fps)
         result["idle"] = percentiles(idle)
         result["idle_sections"] = sections(app)
 
@@ -139,14 +166,14 @@ def main() -> int:
                              "misses": app.prewarmer.misses}
 
         falling: list = []
-        phase_run(app, args.falling, falling)
+        phase_run(app, args.falling, falling, args.pace_fps)
         result["falling"] = percentiles(falling)
         result["falling_sections"] = sections(app)
         result["falling_awake"] = app.world.stats.awake
         result["falling_contacts"] = app.world.stats.contacts
 
         settled: list = []
-        phase_run(app, args.settled, settled)
+        phase_run(app, args.settled, settled, args.pace_fps)
         result["settled"] = percentiles(settled)
         result["settled_sections"] = sections(app)
         result["settled_awake"] = app.world.stats.awake
@@ -155,7 +182,7 @@ def main() -> int:
         app._reassemble()
         reassembling: list = []
         while app.phase is Phase.REASSEMBLING and len(reassembling) < 400:
-            phase_run(app, 1, reassembling)
+            phase_run(app, 1, reassembling, args.pace_fps)
         result["reassembling"] = percentiles(reassembling)
         result["reassembling_sections"] = sections(app)
         result["rest_error_px"] = app.reassembly.rest_error()

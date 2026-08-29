@@ -171,6 +171,11 @@ class FrameProfiler:
         self._history[:] = 16.6
         self._filled = 0
         self._cursor = 0
+        now = time.perf_counter()
+        self._last = now
+        self._frame_start = now
+        self.frame_ms = 16.6
+        self.fps = 60.0
 
 
 class QualityLadder:
@@ -184,8 +189,22 @@ class QualityLadder:
     fracture lands.
     """
 
-    def __init__(self, enabled: bool = True) -> None:
+    def __init__(self, enabled: bool = True, refresh_hz: float = 0.0) -> None:
         self.enabled = enabled
+        # Frame intervals include an intentional swap wait when vsync is on.
+        # A healthy 60Hz cadence is ~16.67ms, so fixed 15/12ms thresholds
+        # would degrade forever despite making every presentation deadline.
+        # Keep the original floors for uncapped and high-refresh displays,
+        # and derive a small missed-deadline margin for slower displays.
+        refresh_ms = 1000.0 / refresh_hz if refresh_hz > 0.0 else 0.0
+        self.step_down_ms = max(
+            config.LADDER_STEP_DOWN_MS,
+            refresh_ms * 1.12,
+        )
+        self.step_up_ms = max(
+            config.LADDER_STEP_UP_MS,
+            refresh_ms * 1.02,
+        )
         self.index = 0
         self.changed_at = 0.0
         self.last_reason = ""
@@ -207,17 +226,17 @@ class QualityLadder:
         if now - self.changed_at < config.LADDER_DWELL_SECONDS:
             return False
 
-        if rolling_ms > config.LADDER_STEP_DOWN_MS:
+        if rolling_ms > self.step_down_ms:
             if self.index < len(config.QUALITY_LADDER) - 1:
                 self.index += 1
                 self.changed_at = now
                 self.steps_down += 1
-                self.last_reason = f"{rolling_ms:.1f}ms > {config.LADDER_STEP_DOWN_MS:.0f}"
+                self.last_reason = f"{rolling_ms:.1f}ms > {self.step_down_ms:.1f}"
                 return True
-        elif rolling_ms < config.LADDER_STEP_UP_MS and self.index > 0:
+        elif rolling_ms < self.step_up_ms and self.index > 0:
             self.index -= 1
             self.changed_at = now
             self.steps_up += 1
-            self.last_reason = f"{rolling_ms:.1f}ms < {config.LADDER_STEP_UP_MS:.0f}"
+            self.last_reason = f"{rolling_ms:.1f}ms < {self.step_up_ms:.1f}"
             return True
         return False

@@ -111,7 +111,10 @@ class ShatterApp:
 
         self.profiler = FrameProfiler()
         self.gpu = GpuProfiler(self.display.ctx)
-        self.ladder = QualityLadder(enabled=options.ladder_enabled)
+        self.ladder = QualityLadder(
+            enabled=options.ladder_enabled,
+            refresh_hz=self.display.refresh_rate if options.vsync else 0.0,
+        )
         self.recorder = Recorder(self.display, mode=options.record_mode)
 
         self.tuning = TuningMode(self.tunables, self.recognizer, self.shapes,
@@ -441,7 +444,7 @@ class ShatterApp:
             ("fps", f"{profiler.fps:.1f}", colour(profiler.frame_ms, 16.6)),
             ("frame", f"{profiler.frame_ms:5.2f} ms", colour(profiler.frame_ms, 16.6)),
             ("rolling 90", f"{profiler.rolling_ms:5.2f} ms",
-             colour(profiler.rolling_ms, config.LADDER_STEP_DOWN_MS)),
+             colour(profiler.rolling_ms, self.ladder.step_down_ms)),
             ("upload", f"{sections.get('upload', 0):5.2f} ms", (0.7, 0.78, 0.9, 1)),
             ("physics", f"{sections.get('physics', 0):5.2f} ms",
              colour(sections.get('physics', 0), 4.0)),
@@ -543,6 +546,11 @@ class ShatterApp:
         # hand snaps) to satisfy the same prediction tolerance as a normal
         # speculative result.
         self.prewarmer.prime(prepared)
+        # Startup compilation and model/cache work happened before the first
+        # presentable frame. Do not let that intentional pause masquerade as
+        # runtime jank and immediately force the quality ladder downward.
+        self.profiler.reset()
+        self.ladder.force(self.ladder.index, time.perf_counter())
         elapsed = time.perf_counter() - start
         if verbose:
             print(f"[warmup] solver and fracture ready in {elapsed:.2f}s")

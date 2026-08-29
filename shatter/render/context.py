@@ -75,6 +75,7 @@ class Display:
         self.canvas_height = canvas_height
         self.headless = headless
         self.vsync = vsync
+        self.refresh_rate = 0.0
         self._window = None
         self._glfw = None
         self.key_events: list[KeyEvent] = []
@@ -127,9 +128,13 @@ class Display:
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE)
         glfw.window_hint(glfw.DOUBLEBUFFER, glfw.TRUE)
 
-        monitor = glfw.get_primary_monitor() if fullscreen else None
+        primary_monitor = glfw.get_primary_monitor()
+        mode = glfw.get_video_mode(primary_monitor)
+        if mode is not None:
+            self.refresh_rate = float(mode.refresh_rate)
+
+        monitor = primary_monitor if fullscreen else None
         if fullscreen:
-            mode = glfw.get_video_mode(monitor)
             width, height = mode.size.width, mode.size.height
         else:
             width = int(cw * window_scale)

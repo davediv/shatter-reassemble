@@ -123,13 +123,16 @@ section timer will attribute to anything.
 
 | Threshold | Value |
 |---|---|
-| Step down above | **15.0 ms** rolling average |
-| Step back up below | **12.0 ms** rolling average |
+| Step down above | **max(15.0 ms, 1.12 × refresh interval)** rolling average |
+| Step back up below | **max(12.0 ms, 1.02 × refresh interval)** rolling average |
 | Minimum dwell on a rung | **1.5 s** |
 | Rolling window | **90 frames** |
 
-The gap between 15 and 12 is deliberate. Stepping down and back up at the
-same threshold oscillates on the boundary, and an app that flickers
+The gap between the thresholds is deliberate. With vsync, both are raised
+above the display's healthy refresh interval so waiting for presentation is
+not mistaken for slow work; a missed refresh still crosses the upper bound.
+Stepping down and back up at the same threshold oscillates on the boundary,
+and an app that flickers
 between refraction on and off looks far worse than one that simply left it
 off. The dwell time stops it walking down several rungs on a single hitch
 — like the one every snap causes.
